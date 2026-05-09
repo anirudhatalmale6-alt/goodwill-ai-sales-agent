@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set active = "orders" %}
+{% set title = "Orders" %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Orders</h1>
+</div>
+
+<div class="tabs">
+    <div class="tab active" onclick="filterOrders(this, '')">All Orders</div>
+    <div class="tab" onclick="filterOrders(this, 'pending')">Pending</div>
+    <div class="tab" onclick="filterOrders(this, 'confirmed')">Confirmed</div>
+    <div class="tab" onclick="filterOrders(this, 'delivered')">Delivered</div>
+    <div class="tab" onclick="filterOrders(this, 'cancelled')">Cancelled</div>
+</div>
+
+<div class="card">
+    <div class="card-body" style="padding:0">
+        <table>
+            <thead>
+                <tr>
+                    <th>Order #</th><th>Customer</th><th>Amount</th>
+                    <th>Payment</th><th>Delivery</th><th>Status</th><th>Date</th>
+                </tr>
+            </thead>
+            <tbody id="orders-body">
+                <tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal-overlay" id="order-detail-modal">
+    <div class="modal" style="width:600px">
+        <div class="modal-header">
+            <h3>Order Details</h3>
+            <button class="modal-close" onclick="hideModal('order-detail-modal')">&times;</button>
+        </div>
+        <div class="modal-body" id="order-detail-body"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function filterOrders(el, status) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        loadOrdersPage(status);
+    }
+    loadOrdersPage();
+</script>
+{% endblock %}

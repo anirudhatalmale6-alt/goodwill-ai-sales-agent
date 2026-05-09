@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+{% set title = "Dashboard" %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <div style="display:flex;gap:10px">
+        <button class="btn btn-outline" onclick="loadDashboard()">Refresh</button>
+    </div>
+</div>
+
+<div id="stats-grid" class="stats-grid">
+    <div class="stat-card"><div class="label">Loading...</div><div class="value">-</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent Orders</h3>
+            <a href="/orders-page" class="btn btn-sm btn-outline">View All</a>
+        </div>
+        <div class="card-body" style="padding:0">
+            <table>
+                <thead>
+                    <tr><th>Order #</th><th>Customer</th><th>Amount</th><th>Delivery</th><th>Status</th><th>Date</th></tr>
+                </thead>
+                <tbody id="recent-orders-body">
+                    <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:30px">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent Calls</h3>
+            <a href="/calls" class="btn btn-sm btn-outline">View All</a>
+        </div>
+        <div class="card-body" style="padding:0">
+            <table>
+                <thead>
+                    <tr><th>Customer</th><th>Language</th><th>Duration</th><th>Summary</th><th>Status</th><th>Date</th></tr>
+                </thead>
+                <tbody id="recent-calls-body">
+                    <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:30px">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-top:20px">
+    <div class="card-header">
+        <h3>Voice Agent Test Widget</h3>
+    </div>
+    <div class="card-body">
+        <div class="widget-embed">
+            <h3>Test the AI Sales Agent</h3>
+            <p>Click the button below to start a voice conversation with the AI agent. Speak naturally as if you're a restaurant customer calling to place an order.</p>
+            <div id="voice-widget-container">
+                <button class="btn btn-primary" id="start-call-btn" onclick="startTestCall()" style="font-size:16px;padding:12px 24px">
+                    Start Test Call
+                </button>
+                <p id="call-status" style="margin-top:12px;color:var(--text-muted);font-size:13px"></p>
+            </div>
+            <div class="agent-config-box" id="agent-config-display">
+Agent ID: Not configured yet
+To set up: Set ELEVENLABS_API_KEY env variable and run the setup script.
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    loadDashboard();
+    setInterval(loadDashboard, 30000);
+
+    function startTestCall() {
+        document.getElementById('call-status').textContent = 'Voice agent widget will be available once ElevenLabs agent is configured.';
+    }
+</script>
+{% endblock %}

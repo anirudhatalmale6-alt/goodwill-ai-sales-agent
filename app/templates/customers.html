@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% set active = "customers" %}
+{% set title = "Customers" %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Customers</h1>
+    <button class="btn btn-primary" onclick="showModal('add-customer-modal')">+ Add Customer</button>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="search-bar">
+            <input type="text" id="customer-search" placeholder="Search by name or code..." onkeyup="debounceCustomerSearch()">
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th><th>Name</th><th>Location</th><th>Contacts</th>
+                    <th>Payment</th><th>Status</th><th></th>
+                </tr>
+            </thead>
+            <tbody id="customers-body">
+                <tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal-overlay" id="add-customer-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Add New Customer</h3>
+            <button class="modal-close" onclick="hideModal('add-customer-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Customer Code</label>
+                <input type="number" id="new-cust-code" placeholder="e.g., 2005">
+            </div>
+            <div class="form-group">
+                <label>Restaurant/Shop Name</label>
+                <input type="text" id="new-cust-name" placeholder="e.g., star restaurant">
+            </div>
+            <div class="form-group">
+                <label>Location</label>
+                <input type="text" id="new-cust-location" placeholder="e.g., doha">
+            </div>
+            <div class="form-group">
+                <label>Payment Terms</label>
+                <select id="new-cust-payment">
+                    <option value="cash">Cash</option>
+                    <option value="30 days">30 Days</option>
+                    <option value="60 days">60 Days</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Contact Person</label>
+                <input type="text" id="new-cust-contact" placeholder="e.g., raju">
+            </div>
+            <div class="form-group">
+                <label>Phone Number</label>
+                <input type="text" id="new-cust-phone" placeholder="e.g., 55501234">
+            </div>
+            <div class="form-group">
+                <label>Preferred Calling Time</label>
+                <input type="text" id="new-cust-calltime" placeholder="e.g., 8.15 pm">
+            </div>
+            <button class="btn btn-primary" onclick="addCustomer()">Add Customer</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let custSearchTimer;
+    function debounceCustomerSearch() {
+        clearTimeout(custSearchTimer);
+        custSearchTimer = setTimeout(() => {
+            loadCustomers(document.getElementById('customer-search').value);
+        }, 300);
+    }
+    loadCustomers();
+</script>
+{% endblock %}

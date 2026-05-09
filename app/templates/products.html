@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% set active = "products" %}
+{% set title = "Products" %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Products <span id="product-count" style="font-size:14px;color:var(--text-muted);font-weight:400"></span></h1>
+    <button class="btn btn-outline" onclick="reloadData()">Reload from Excel</button>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="search-bar">
+            <input type="text" id="product-search" placeholder="Search products (name, category, alternative name)..." onkeyup="debounceSearch()">
+            <select id="dept-filter" onchange="filterProducts()">
+                <option value="">All Departments</option>
+            </select>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th><th>Dept</th><th>Category</th><th>Description</th>
+                    <th>Alt Name</th><th>Packing</th><th>UOM</th><th>Price</th><th>Tags</th><th></th>
+                </tr>
+            </thead>
+            <tbody id="products-body">
+                <tr><td colspan="10" style="text-align:center;color:#94a3b8;padding:30px">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal-overlay" id="edit-product-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Edit Product</h3>
+            <button class="modal-close" onclick="hideModal('edit-product-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="edit-product-id">
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" id="edit-product-desc">
+            </div>
+            <div class="form-group">
+                <label>Price (QR)</label>
+                <input type="number" id="edit-product-price" step="0.01">
+            </div>
+            <div class="form-group">
+                <label>Alternative Names</label>
+                <input type="text" id="edit-product-alt" placeholder="e.g., leg, leg piece">
+            </div>
+            <div class="form-group">
+                <label>Specification</label>
+                <textarea id="edit-product-spec" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" id="edit-product-stock"> In Stock</label>
+            </div>
+            <button class="btn btn-primary" onclick="saveProduct()">Save Changes</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let searchTimer;
+    function debounceSearch() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(filterProducts, 300);
+    }
+    function filterProducts() {
+        loadProducts(
+            document.getElementById('product-search').value,
+            document.getElementById('dept-filter').value
+        );
+    }
+    async function reloadData() {
+        await postJSON('/api/reload-data', {});
+        loadProducts();
+        loadDepartments();
+        alert('Data reloaded from Excel files');
+    }
+    loadProducts();
+    loadDepartments();
+</script>
+{% endblock %}

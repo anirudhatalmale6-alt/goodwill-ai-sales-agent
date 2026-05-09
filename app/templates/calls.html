@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set active = "calls" %}
+{% set title = "Call Logs" %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Call Logs</h1>
+</div>
+
+<div class="tabs">
+    <div class="tab active" onclick="filterCalls(this, 'all')">All Calls</div>
+    <div class="tab" onclick="filterCalls(this, 'complaints')">Complaints</div>
+    <div class="tab" onclick="filterCalls(this, 'callbacks')">Callbacks Required</div>
+</div>
+
+<div class="card">
+    <div class="card-body" style="padding:0">
+        <table>
+            <thead>
+                <tr>
+                    <th>Customer</th><th>Phone</th><th>Language</th>
+                    <th>Duration</th><th>Summary</th><th>Flags</th><th>Date</th>
+                </tr>
+            </thead>
+            <tbody id="calls-body">
+                <tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function filterCalls(el, filter) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        loadCallsPage(filter === 'all' ? null : filter);
+    }
+    loadCallsPage();
+</script>
+{% endblock %}
