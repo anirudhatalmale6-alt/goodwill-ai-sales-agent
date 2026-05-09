@@ -53,21 +53,13 @@
 <div class="card" style="margin-top:20px">
     <div class="card-header">
         <h3>Voice Agent Test Widget</h3>
+        <a href="https://elevenlabs.io/app/talk-to?agent_id=agent_5201kr6twys3edb8kmthx42wwm3z" target="_blank" class="btn btn-sm btn-primary">Open Full Page Widget</a>
     </div>
     <div class="card-body">
         <div class="widget-embed">
             <h3>Test the AI Sales Agent</h3>
-            <p>Click the button below to start a voice conversation with the AI agent. Speak naturally as if you're a restaurant customer calling to place an order.</p>
-            <div id="voice-widget-container">
-                <button class="btn btn-primary" id="start-call-btn" onclick="startTestCall()" style="font-size:16px;padding:12px 24px">
-                    Start Test Call
-                </button>
-                <p id="call-status" style="margin-top:12px;color:var(--text-muted);font-size:13px"></p>
-            </div>
-            <div class="agent-config-box" id="agent-config-display">
-Agent ID: Not configured yet
-To set up: Set ELEVENLABS_API_KEY env variable and run the setup script.
-            </div>
+            <p>Speak naturally as if you're a restaurant customer calling to place an order. The agent speaks English, Hindi, Malayalam, Bengali, and Arabic.</p>
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">Agent ID: agent_5201kr6twys3edb8kmthx42wwm3z</p>
         </div>
     </div>
 </div>
@@ -77,9 +69,7 @@ To set up: Set ELEVENLABS_API_KEY env variable and run the setup script.
 <script>
     loadDashboard();
     setInterval(loadDashboard, 30000);
-
-    function startTestCall() {
-        document.getElementById('call-status').textContent = 'Voice agent widget will be available once ElevenLabs agent is configured.';
-    }
 </script>
+<elevenlabs-convai agent-id="agent_5201kr6twys3edb8kmthx42wwm3z"></elevenlabs-convai>
+<script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
 {% endblock %}
