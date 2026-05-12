@@ -674,9 +674,11 @@ async def agent_identify_customer(request: Request):
 
         row = conn.execute("""
             SELECT c.id, c.customer_code, c.customer_name, c.location,
-                   c.payment_terms, cc.contact_person
+                   c.payment_terms, cc.contact_person,
+                   cs.calling_time, cs.rescheduled_time
             FROM customer_contacts cc
             JOIN customers c ON c.id = cc.customer_id
+            LEFT JOIN customer_call_schedule cs ON cs.customer_id = c.id
             WHERE cc.phone_number LIKE ? AND cc.is_active = 1
         """, (f"%{phone_clean[-8:]}",)).fetchone()
 
@@ -690,7 +692,9 @@ async def agent_identify_customer(request: Request):
                 "location": row["location"],
                 "payment_terms": row["payment_terms"],
                 "contact_person": row["contact_person"],
-                "greeting": f"Hello {row['contact_person']}, welcome back! You're calling from {row['customer_name']}."
+                "calling_time": row["calling_time"],
+                "rescheduled_time": row["rescheduled_time"],
+                "greeting": "Hello sir, welcome back to Goodwill!"
             }
 
     if name:
@@ -708,7 +712,7 @@ async def agent_identify_customer(request: Request):
                 "customer_name": row["customer_name"],
                 "location": row["location"],
                 "payment_terms": row["payment_terms"],
-                "greeting": f"Great, {row['customer_name']}! How can I help you today?"
+                "greeting": "Hello sir, welcome back to Goodwill!"
             }
 
     conn.close()
@@ -722,13 +726,77 @@ async def agent_identify_customer(request: Request):
 async def agent_create_order(request: Request):
     """Webhook tool: create order from voice agent."""
     data = await request.json()
-    result = await create_order(request)
+    conn = get_db()
+    c = conn.cursor()
+
+    order_num = f"GW-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    customer_id = data.get("customer_id")
+    items = data.get("items", [])
+
+    for item in items:
+        if not item.get("total_price") and item.get("unit_price") and item.get("quantity"):
+            item["total_price"] = round(item["unit_price"] * item["quantity"], 2)
+        if not item.get("unit_price") and item.get("product_id"):
+            prod = conn.execute("SELECT price FROM products WHERE id = ?",
+                                (item["product_id"],)).fetchone()
+            if prod:
+                item["unit_price"] = prod["price"]
+                item["total_price"] = round(prod["price"] * item.get("quantity", 1), 2)
+
+    total = sum(item.get("total_price", 0) for item in items)
+    wallet_discount = data.get("wallet_discount", 0)
+    wallet_upsell = data.get("wallet_upsell", 0)
+
+    delivery = data.get("delivery_schedule", "")
+    if not delivery:
+        hour = datetime.now().hour
+        if hour >= 14 or hour < 6:
+            delivery = "morning (5 AM dispatch)"
+        else:
+            delivery = "afternoon (2:30 PM dispatch)"
+
+    c.execute("""
+        INSERT INTO orders (order_number, customer_id, caller_phone, caller_name,
+            total_amount, payment_terms, delivery_schedule, status, notes,
+            wallet_discount, wallet_upsell, wallet_balance, conversation_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)
+    """, (order_num, customer_id, data.get("caller_phone"), data.get("caller_name"),
+          total, data.get("payment_terms", "cash"), delivery, data.get("notes"),
+          wallet_discount, wallet_upsell, wallet_upsell - wallet_discount,
+          data.get("conversation_id")))
+    order_id = c.lastrowid
+
+    for item in items:
+        c.execute("""
+            INSERT INTO order_items (order_id, product_id, product_description,
+                packing, uom, quantity, unit_price, total_price, discount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (order_id, item.get("product_id"), item.get("product_description"),
+              item.get("packing"), item.get("uom"), item.get("quantity", 1),
+              item.get("unit_price"), item.get("total_price"), item.get("discount", 0)))
+
+    if wallet_upsell > 0:
+        c.execute("""
+            INSERT INTO wallet_transactions (customer_id, order_id, transaction_type, amount, description)
+            VALUES (?, ?, 'upsell_credit', ?, ?)
+        """, (customer_id, order_id, wallet_upsell, f"Upsell credit from order {order_num}"))
+
+    if wallet_discount > 0:
+        c.execute("""
+            INSERT INTO wallet_transactions (customer_id, order_id, transaction_type, amount, description)
+            VALUES (?, ?, 'discount_debit', ?, ?)
+        """, (customer_id, order_id, -wallet_discount, f"Discount applied on order {order_num}"))
+
+    conn.commit()
+    conn.close()
+
     return {
         "success": True,
-        "order_number": result["order_number"],
-        "total_amount": result["total_amount"],
-        "delivery_schedule": result["delivery_schedule"],
-        "confirmation_message": f"Your order {result['order_number']} has been confirmed. Total is {result['total_amount']} riyals. Delivery will be {result['delivery_schedule']}. Please hand over the amount to the delivery person."
+        "order_id": order_id,
+        "order_number": order_num,
+        "total_amount": total,
+        "delivery_schedule": delivery,
+        "confirmation_message": f"Your order {order_num} has been confirmed. Total is {total} riyals. Delivery will be {delivery}. Please hand over the amount to the delivery person."
     }
 
 
@@ -793,3 +861,221 @@ async def agent_add_phone(request: Request):
     conn.commit()
     conn.close()
     return {"status": "added", "message": f"Phone number {phone} added for {person}"}
+
+
+@app.post("/api/agent/get_customer_orders")
+async def agent_get_customer_orders(request: Request):
+    """Webhook tool: get order history for a customer."""
+    data = await request.json()
+    customer_id = data.get("customer_id")
+    product_query = data.get("product", "")
+    limit = data.get("limit", 5)
+
+    if not customer_id:
+        return {"found": False, "message": "Customer ID required"}
+
+    conn = get_db()
+
+    query = """
+        SELECT o.id, o.order_number, o.total_amount, o.status, o.delivery_schedule,
+               o.created_at, o.notes
+        FROM orders o
+        WHERE o.customer_id = ? AND o.created_at >= '2026-05-12'
+        ORDER BY o.created_at DESC LIMIT ?
+    """
+    orders = conn.execute(query, (customer_id, limit)).fetchall()
+
+    if not orders:
+        conn.close()
+        if product_query:
+            return {
+                "found": False,
+                "message": f"No previous orders found for {product_query}. This customer hasn't ordered before."
+            }
+        return {"found": False, "message": "No order history found for this customer."}
+
+    order_list = []
+    for o in orders:
+        o_dict = dict(o)
+        items = conn.execute("""
+            SELECT oi.product_description, oi.quantity, oi.unit_price, oi.total_price,
+                   oi.packing, oi.uom, p.category, p.brand
+            FROM order_items oi
+            LEFT JOIN products p ON p.id = oi.product_id
+            WHERE oi.order_id = ?
+        """, (o["id"],)).fetchall()
+        o_dict["items"] = [dict(i) for i in items]
+        order_list.append(o_dict)
+
+    conn.close()
+
+    if product_query:
+        matching_items = []
+        for order in order_list:
+            for item in order["items"]:
+                desc = (item.get("product_description") or "").lower()
+                cat = (item.get("category") or "").lower()
+                if product_query.lower() in desc or product_query.lower() in cat:
+                    matching_items.append({
+                        "product": item["product_description"],
+                        "quantity": item["quantity"],
+                        "price": item["unit_price"],
+                        "packing": item["packing"],
+                        "order_date": order["created_at"],
+                        "order_number": order["order_number"]
+                    })
+        if matching_items:
+            return {
+                "found": True,
+                "product_history": matching_items,
+                "message": f"Found {len(matching_items)} past order(s) for {product_query}"
+            }
+        else:
+            return {
+                "found": False,
+                "message": f"Customer has orders but never ordered {product_query} before."
+            }
+
+    return {
+        "found": True,
+        "order_count": len(order_list),
+        "orders": order_list,
+        "message": f"Found {len(order_list)} recent order(s)"
+    }
+
+
+@app.post("/api/agent/get_wallet_balance")
+async def agent_get_wallet_balance(request: Request):
+    """Webhook tool: get wallet balance for a customer."""
+    data = await request.json()
+    customer_id = data.get("customer_id")
+
+    if not customer_id:
+        return {"balance": 0, "message": "Customer ID required"}
+
+    conn = get_db()
+    result = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) as balance FROM wallet_transactions WHERE customer_id = ?",
+        (customer_id,)
+    ).fetchone()
+
+    recent = conn.execute("""
+        SELECT transaction_type, amount, description, created_at
+        FROM wallet_transactions WHERE customer_id = ?
+        ORDER BY created_at DESC LIMIT 5
+    """, (customer_id,)).fetchall()
+
+    conn.close()
+
+    balance = round(result["balance"], 2)
+    return {
+        "balance": balance,
+        "recent_transactions": [dict(r) for r in recent],
+        "message": f"Current wallet balance is {balance} riyals" if balance > 0 else "Wallet balance is 0. No credits yet."
+    }
+
+
+@app.post("/api/agent/update_wallet")
+async def agent_update_wallet(request: Request):
+    """Webhook tool: add wallet transaction (credit/debit)."""
+    data = await request.json()
+    customer_id = data.get("customer_id")
+    txn_type = data.get("transaction_type", "adjustment")
+    amount = data.get("amount", 0)
+    description = data.get("description", "")
+    order_id = data.get("order_id")
+
+    if not customer_id or amount == 0:
+        return {"status": "error", "message": "Customer ID and non-zero amount required"}
+
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO wallet_transactions (customer_id, order_id, transaction_type, amount, description)
+        VALUES (?, ?, ?, ?, ?)
+    """, (customer_id, order_id, txn_type, amount, description))
+    conn.commit()
+
+    new_balance = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM wallet_transactions WHERE customer_id = ?",
+        (customer_id,)
+    ).fetchone()[0]
+    conn.close()
+
+    return {
+        "status": "recorded",
+        "new_balance": round(new_balance, 2),
+        "message": f"Transaction recorded. New wallet balance: {round(new_balance, 2)} riyals"
+    }
+
+
+@app.post("/api/agent/update_customer")
+async def agent_update_customer_data(request: Request):
+    """Webhook tool: update customer info (calling time, delivery preference, etc.)."""
+    data = await request.json()
+    customer_id = data.get("customer_id")
+
+    if not customer_id:
+        return {"status": "error", "message": "Customer ID required"}
+
+    conn = get_db()
+    updated_fields = []
+
+    if "delivery_preference" in data:
+        try:
+            conn.execute("UPDATE customers SET delivery_preference = ? WHERE id = ?",
+                         (data["delivery_preference"], customer_id))
+            updated_fields.append("delivery_preference")
+        except Exception:
+            pass
+
+    if "payment_terms" in data:
+        conn.execute("UPDATE customers SET payment_terms = ?, updated_at = ? WHERE id = ?",
+                     (data["payment_terms"], datetime.now().isoformat(), customer_id))
+        updated_fields.append("payment_terms")
+
+    if "location" in data:
+        conn.execute("UPDATE customers SET location = ?, updated_at = ? WHERE id = ?",
+                     (data["location"].lower(), datetime.now().isoformat(), customer_id))
+        updated_fields.append("location")
+
+    if "calling_time" in data:
+        existing = conn.execute(
+            "SELECT id FROM customer_call_schedule WHERE customer_id = ?",
+            (customer_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE customer_call_schedule SET calling_time = ? WHERE customer_id = ?",
+                (data["calling_time"], customer_id))
+        else:
+            conn.execute(
+                "INSERT INTO customer_call_schedule (customer_id, calling_time) VALUES (?, ?)",
+                (customer_id, data["calling_time"]))
+        updated_fields.append("calling_time")
+
+    if "rescheduled_time" in data:
+        existing = conn.execute(
+            "SELECT id FROM customer_call_schedule WHERE customer_id = ?",
+            (customer_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE customer_call_schedule SET rescheduled_time = ? WHERE customer_id = ?",
+                (data["rescheduled_time"], customer_id))
+        else:
+            conn.execute(
+                "INSERT INTO customer_call_schedule (customer_id, calling_time, rescheduled_time) VALUES (?, '', ?)",
+                (customer_id, data["rescheduled_time"]))
+        updated_fields.append("rescheduled_time")
+
+    conn.commit()
+    conn.close()
+
+    if not updated_fields:
+        return {"status": "no_changes", "message": "No valid fields to update"}
+
+    return {
+        "status": "updated",
+        "updated_fields": updated_fields,
+        "message": f"Updated: {', '.join(updated_fields)}"
+    }

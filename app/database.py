@@ -8,7 +8,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -145,6 +145,18 @@ def init_db():
             FOREIGN KEY (call_log_id) REFERENCES call_logs(id)
         );
 
+        CREATE TABLE IF NOT EXISTS wallet_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER,
+            order_id INTEGER,
+            transaction_type TEXT,
+            amount REAL,
+            description TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_products_department ON products(department);
         CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
         CREATE INDEX IF NOT EXISTS idx_products_code ON products(code);
@@ -153,7 +165,13 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
         CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
         CREATE INDEX IF NOT EXISTS idx_call_logs_customer ON call_logs(customer_id);
+        CREATE INDEX IF NOT EXISTS idx_wallet_customer ON wallet_transactions(customer_id);
     """)
+
+    try:
+        c.execute("ALTER TABLE customers ADD COLUMN delivery_preference TEXT DEFAULT 'morning'")
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()
