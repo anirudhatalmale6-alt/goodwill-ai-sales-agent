@@ -946,24 +946,19 @@ async def agent_get_customer_orders(request: Request):
 
 @app.post("/api/agent/get_wallet_balance")
 async def agent_get_wallet_balance(request: Request):
-    """Webhook tool: get wallet balance for a customer."""
+    """Webhook tool: get shared wallet balance (pool across all customers)."""
     data = await request.json()
-    customer_id = data.get("customer_id")
-
-    if not customer_id:
-        return {"balance": 0, "message": "Customer ID required"}
 
     conn = get_db()
     result = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0) as balance FROM wallet_transactions WHERE customer_id = ?",
-        (customer_id,)
+        "SELECT COALESCE(SUM(amount), 0) as balance FROM wallet_transactions"
     ).fetchone()
 
     recent = conn.execute("""
         SELECT transaction_type, amount, description, created_at
-        FROM wallet_transactions WHERE customer_id = ?
+        FROM wallet_transactions
         ORDER BY created_at DESC LIMIT 5
-    """, (customer_id,)).fetchall()
+    """).fetchall()
 
     conn.close()
 
@@ -971,7 +966,7 @@ async def agent_get_wallet_balance(request: Request):
     return {
         "balance": balance,
         "recent_transactions": [dict(r) for r in recent],
-        "message": f"Current wallet balance is {balance} riyals" if balance > 0 else "Wallet balance is 0. No credits yet."
+        "message": f"Current wallet balance is {balance} riyals" if balance > 0 else "Wallet balance is 0. No credits available."
     }
 
 
@@ -1010,7 +1005,7 @@ async def agent_update_wallet(request: Request):
 
 @app.post("/api/agent/update_customer")
 async def agent_update_customer_data(request: Request):
-    """Webhook tool: update customer info (calling time, delivery preference, etc.)."""
+    """Webhook tool: update customer calling time."""
     data = await request.json()
     customer_id = data.get("customer_id")
 
@@ -1019,24 +1014,6 @@ async def agent_update_customer_data(request: Request):
 
     conn = get_db()
     updated_fields = []
-
-    if "delivery_preference" in data:
-        try:
-            conn.execute("UPDATE customers SET delivery_preference = ? WHERE id = ?",
-                         (data["delivery_preference"], customer_id))
-            updated_fields.append("delivery_preference")
-        except Exception:
-            pass
-
-    if "payment_terms" in data:
-        conn.execute("UPDATE customers SET payment_terms = ?, updated_at = ? WHERE id = ?",
-                     (data["payment_terms"], datetime.now().isoformat(), customer_id))
-        updated_fields.append("payment_terms")
-
-    if "location" in data:
-        conn.execute("UPDATE customers SET location = ?, updated_at = ? WHERE id = ?",
-                     (data["location"].lower(), datetime.now().isoformat(), customer_id))
-        updated_fields.append("location")
 
     if "calling_time" in data:
         existing = conn.execute(
