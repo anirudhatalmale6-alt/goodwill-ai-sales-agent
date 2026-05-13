@@ -715,7 +715,30 @@ async def agent_identify_customer(request: Request):
                 "greeting": "Hello sir, welcome back to Goodwill!"
             }
 
+    # Trial phase: default to beach restaurant (customer_code 2004) when no match found
+    row = conn.execute("""
+        SELECT c.id, c.customer_code, c.customer_name, c.location,
+               c.payment_terms, cs.calling_time, cs.rescheduled_time
+        FROM customers c
+        LEFT JOIN customer_call_schedule cs ON cs.customer_id = c.id
+        WHERE c.customer_code = 2004
+    """).fetchone()
     conn.close()
+
+    if row:
+        return {
+            "found": True,
+            "customer_id": row["id"],
+            "customer_code": row["customer_code"],
+            "customer_name": row["customer_name"],
+            "location": row["location"],
+            "payment_terms": row["payment_terms"],
+            "calling_time": row["calling_time"],
+            "rescheduled_time": row["rescheduled_time"],
+            "greeting": "Hello sir, welcome back to Goodwill!",
+            "note": "Trial mode: defaulted to beach restaurant"
+        }
+
     return {
         "found": False,
         "message": "I couldn't find this customer in our system. Let me note your details - what is your shop name and location?"
@@ -743,9 +766,14 @@ async def agent_create_order(request: Request):
                 item["unit_price"] = prod["price"]
                 item["total_price"] = round(prod["price"] * item.get("quantity", 1), 2)
 
-    total = sum(item.get("total_price", 0) for item in items)
-    wallet_discount = data.get("wallet_discount", 0)
+    gross_total = round(sum(item.get("total_price", 0) for item in items), 2)
+    total_discount = round(sum(
+        item.get("discount", 0) * item.get("quantity", 1) for item in items
+    ), 2)
+    net_total = round(gross_total - total_discount, 2)
+
     wallet_upsell = data.get("wallet_upsell", 0)
+    wallet_discount = data.get("wallet_discount", total_discount)
 
     delivery = data.get("delivery_schedule", "")
     if not delivery:
@@ -761,12 +789,12 @@ async def agent_create_order(request: Request):
             wallet_discount, wallet_upsell, wallet_balance, conversation_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)
     """, (order_num, customer_id, data.get("caller_phone"), data.get("caller_name"),
-          total, data.get("payment_terms", "cash"), delivery, data.get("notes"),
+          net_total, data.get("payment_terms", "cash"), delivery, data.get("notes"),
           wallet_discount, wallet_upsell, wallet_upsell - wallet_discount,
           data.get("conversation_id")))
     order_id = c.lastrowid
 
-    for item in items:
+    for idx, item in enumerate(items, 1):
         c.execute("""
             INSERT INTO order_items (order_id, product_id, product_description,
                 packing, uom, quantity, unit_price, total_price, discount)
@@ -781,11 +809,11 @@ async def agent_create_order(request: Request):
             VALUES (?, ?, 'upsell_credit', ?, ?)
         """, (customer_id, order_id, wallet_upsell, f"Upsell credit from order {order_num}"))
 
-    if wallet_discount > 0:
+    if total_discount > 0:
         c.execute("""
             INSERT INTO wallet_transactions (customer_id, order_id, transaction_type, amount, description)
             VALUES (?, ?, 'discount_debit', ?, ?)
-        """, (customer_id, order_id, -wallet_discount, f"Discount applied on order {order_num}"))
+        """, (customer_id, order_id, -total_discount, f"Discount applied on order {order_num}"))
 
     conn.commit()
     conn.close()
@@ -794,9 +822,12 @@ async def agent_create_order(request: Request):
         "success": True,
         "order_id": order_id,
         "order_number": order_num,
-        "total_amount": total,
+        "gross_total": gross_total,
+        "discount": total_discount,
+        "net_total": net_total,
+        "total_amount": net_total,
         "delivery_schedule": delivery,
-        "confirmation_message": f"Your order {order_num} has been confirmed. Total is {total} riyals. Delivery will be {delivery}. Please hand over the amount to the delivery person."
+        "confirmation_message": f"Your order {order_num} has been confirmed. Gross total is {gross_total} riyals, discount {total_discount} riyals, net total {net_total} riyals. Delivery will be {delivery}. Please hand over the amount to the delivery person."
     }
 
 
@@ -944,11 +975,7 @@ async def agent_get_customer_orders(request: Request):
     }
 
 
-@app.post("/api/agent/get_wallet_balance")
-async def agent_get_wallet_balance(request: Request):
-    """Webhook tool: get shared wallet balance (pool across all customers)."""
-    data = await request.json()
-
+def _get_wallet_balance():
     conn = get_db()
     result = conn.execute(
         "SELECT COALESCE(SUM(amount), 0) as balance FROM wallet_transactions"
@@ -957,7 +984,7 @@ async def agent_get_wallet_balance(request: Request):
     recent = conn.execute("""
         SELECT transaction_type, amount, description, created_at
         FROM wallet_transactions
-        ORDER BY created_at DESC LIMIT 5
+        ORDER BY created_at DESC LIMIT 10
     """).fetchall()
 
     conn.close()
@@ -968,6 +995,18 @@ async def agent_get_wallet_balance(request: Request):
         "recent_transactions": [dict(r) for r in recent],
         "message": f"Current wallet balance is {balance} riyals" if balance > 0 else "Wallet balance is 0. No credits available."
     }
+
+
+@app.get("/api/agent/get_wallet_balance")
+async def agent_get_wallet_balance_get():
+    """Browser-friendly: get shared wallet balance."""
+    return _get_wallet_balance()
+
+
+@app.post("/api/agent/get_wallet_balance")
+async def agent_get_wallet_balance(request: Request):
+    """Webhook tool: get shared wallet balance (pool across all customers)."""
+    return _get_wallet_balance()
 
 
 @app.post("/api/agent/update_wallet")
